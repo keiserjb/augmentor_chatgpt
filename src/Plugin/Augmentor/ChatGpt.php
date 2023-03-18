@@ -8,7 +8,7 @@ use Drupal\Component\Serialization\Json;
 use Drupal\augmentor_chatgpt\ChatGptBase;
 
 /**
- * OpenAI GPT3 augmentor plugin implementation.
+ * ChatGPT augmentor plugin implementation.
  *
  * @Augmentor(
  *   id = "chatgpt",
