@@ -326,11 +326,9 @@ class ChatGpt extends ChatGptBase {
       else {
         foreach ($result['choices'] as $choice) {
           if ($choice['message']) {
-            $output[] = $this->normalizeText($choice['message']['content']);
+            $output['default'] = $this->normalizeText($choice['message']['content']);
           }
         }
-
-        $output['default'] = $output;
       }
     }
     catch (\Throwable $error) {
