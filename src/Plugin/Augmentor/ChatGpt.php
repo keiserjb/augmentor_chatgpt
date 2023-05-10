@@ -312,7 +312,7 @@ class ChatGpt extends ChatGptBase {
 
     try {
       $result = Json::decode($this->getClient()->chat($options), TRUE);
-      $output = [];
+      $choices = [];
 
       if (array_key_exists('_errors', $result)) {
         $this->logger->error('OpenAI API error: %message.', [
@@ -326,9 +326,11 @@ class ChatGpt extends ChatGptBase {
       else {
         foreach ($result['choices'] as $choice) {
           if ($choice['message']) {
-            $output['default'] = $this->normalizeText($choice['message']['content']);
+            $choices[] = $this->normalizeText($choice['message']['content']);
           }
         }
+
+        $output['default'] = $choices;
       }
     }
     catch (\Throwable $error) {
