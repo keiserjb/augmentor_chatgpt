@@ -57,16 +57,15 @@ class ChatGpt extends ChatGptBase {
   public function buildConfigurationForm(array $form, FormStateInterface $form_state) {
     $form = parent::buildConfigurationForm($form, $form_state);
 
-    $form['model'] = [
-      '#type' => 'select',
-      '#title' => $this->t('Model'),
-      '#description' => $this->t("Currently, only gpt-3.5-turbo and gpt-3.5-turbo-0301 are <a href='https://platform.openai.com/docs/api-reference/chat/create#chat/create-model' target='_blank'>supported</a>."),
-      '#options' => [
-        'gpt-3.5-turbo' => 'gpt-3.5-turbo',
-        'gpt-3.5-turbo-0301' => 'gpt-3.5-turbo-0301',
-      ],
-      '#default_value' => $this->configuration['model'] ?? self::DEFAULT_ENGINE,
-    ];
+    if ($this->configuration['key']) {
+      $form['model'] = [
+        '#type' => 'select',
+        '#title' => $this->t('Model'),
+        '#options' => $this->engines(),
+        '#description' => $this->t("The model used for the chat completion."),
+        '#default_value' => $this->configuration['model'] ?? self::DEFAULT_ENGINE,
+      ];
+    }
 
     $messages = $this->configuration['messages'] ?? [];
     $num_messages = $form_state->get('num_messages');
@@ -343,6 +342,31 @@ class ChatGpt extends ChatGptBase {
     }
 
     return $output;
+  }
+
+  /**
+   * Gets the available list of OpenAI engines.
+   *
+   * @return array
+   *   A list of available engines.
+   */
+  private function engines() {
+    $engines = [];
+    $results = $this->getClient()->engines();
+    $results = Json::decode($results, TRUE);
+
+    if (array_key_exists('data', $results)) {
+      foreach ($results['data'] as $result) {
+        $engines[$result['id']] = $result['id'];
+      }
+    }
+    else {
+      $this->logger->error('OpenAI API error: %message.', [
+        '%message' => $results['error']['message'],
+      ]);
+    }
+
+    return $engines;
   }
 
 }
