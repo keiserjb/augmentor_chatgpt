@@ -1,0 +1,306 @@
+diff --git a/composer.json b/composer.json
+index dab66c5..a0b614b 100644
+--- a/composer.json
++++ b/composer.json
+@@ -5,6 +5,7 @@
+   "homepage": "http://drupal.org/project/augmentor_chatgpt",
+   "license": "GPL-2.0-or-later",
+   "require": {
+-    "orhanerday/open-ai": "^4.7"
++    "orhanerday/open-ai": "^4.7",
++    "openai-php/client": "^0.4"
+   }
+ }
+diff --git a/src/ChatGptBase.php b/src/ChatGptBase.php
+index 00c4634..e8438e5 100644
+--- a/src/ChatGptBase.php
++++ b/src/ChatGptBase.php
+@@ -4,7 +4,9 @@ namespace Drupal\augmentor_chatgpt;
+ 
+ use Drupal\augmentor\AugmentorBase;
+ use Drupal\Core\Plugin\ContainerFactoryPluginInterface;
+-use Orhanerday\OpenAi\OpenAi;
++use Drupal\Core\Form\FormStateInterface;
++use Orhanerday\OpenAi\OpenAi as OrhanerdayOpenAi;
++use OpenAI\Client;
+ 
+ /**
+  * ChatGPT Base augmentor plugin implementation.
+@@ -21,21 +23,161 @@ use Orhanerday\OpenAi\OpenAi;
+ class ChatGptBase extends AugmentorBase implements ContainerFactoryPluginInterface {
+ 
+   /**
+-   * Gets the OpenAI SDK API client.
++   * The OpenAI API client.
++   *
++   * @var \Orhanerday\OpenAi\OpenAi|\OpenAI\Client|null
++   */
++  private $client = null;
++
++  /**
++   * {@inheritdoc}
++   */
++  public function defaultConfiguration() {
++    return parent::defaultConfiguration() + [
++      'sdk' => NULL,
++    ];
++  }
++
++  /**
++   * {@inheritdoc}
++   */
++  public function buildConfigurationForm(array $form, FormStateInterface $form_state) {
++    $form = parent::buildConfigurationForm($form, $form_state);
++
++    $form['sdk'] = [
++      '#type' => 'select',
++      '#title' => $this->t('SDK to use'),
++      '#options' => [
++        'orhanerday' => 'orhanerday/open-ai',
++        'openai_php' => 'openai-php/client',
++      ],
++      '#description' => $this->t('Choose the OpenAI PHP SDK to use:
++        <a href=":link">orhanerday/open-ai</a> or <a href=":link2">openai-php/client</a>', [
++          ':link' => 'https://github.com/orhanerday/open-ai',
++          ':link2' => 'https://github.com/openai-php/client',
++        ]),
++      '#default_value' => $this->configuration['sdk'] ?? 'orhanerday',
++    ];
++
++    return $form;
++  }
++
++  /**
++   * {@inheritdoc}
++   */
++  public function submitConfigurationForm(array &$form, FormStateInterface $form_state) {
++    parent::submitConfigurationForm($form, $form_state);
++    $this->configuration['sdk'] = $form_state->getValue('sdk');
++  }
++
++  /**
++   * Gets the OpenAI SDK API client to use.
++   *
++   * @return mixed
++   *   The OpenAI SDK.
++   */
++  public function getClient(): mixed {
++    if ($this->getSdk() === 'orhanerday') {
++      return $this->getOrhanerdayClient();
++    }
++
++    return $this->getOpenAiClient();
++  }
++
++  /**
++   * Gets an OpenAI client using the "orhanerday/open-ai" SDK.
+    *
+    * @return \Orhanerday\OpenAi\OpenAi
+-   *   The OpenAI SDK API client.
++   *   The "orhanerday/open-ai" OpenAI SDK.
++   */
++  private function getOrhanerdayClient(): OrhanerdayOpenAi {
++
++    // Only if not initialized yet.
++    if (empty($this->client)) {
++      $api_key = $this->getKeyValue();
++
++      // Initialize API client.
++      $this->client = new OrhanerdayOpenAi($api_key);
++    }
++    return $this->client;
++  }
++
++  /**
++   * Gets an OpenAI client using the "openai-php/client" SDK.
++   *
++   * @return \OpenAI\Client
++   *   The "openai-php/client" OpenAI SDK.
+    */
+-  public function getClient(): OpenAi {
++  private function getOpenAiClient(): Client {
+ 
+     // Only if not initialized yet.
+     if (empty($this->client)) {
+       $api_key = $this->getKeyValue();
+ 
+       // Initialize API client.
+-      $this->client = new OpenAi($api_key);
++      $this->client = \OpenAI::client($api_key);
+     }
+     return $this->client;
+   }
+ 
++  /**
++   * Gets the name of the selected SDK to use.
++   *
++   * @return string
++   *   The name of the SDK to use.
++   */
++  protected function getSdk() {
++    $sdk_to_use = $this->configuration['sdk'] ?? 'orhanerday';
++
++    return $sdk_to_use;
++  }
++
++
++  /**
++   * Fetches models using the orhanerday SDK.
++   *
++   * @return array
++   */
++  protected function listModelsOrhanerday(): array {
++    $openAi = $this->getOrhanerdayClient();
++    $result = $openAi->listModels();
++
++    // Assuming $result is a JSON string; decode it first.
++    $decodedResult = json_decode($result, true);
++
++    // Check if decoding was successful and the expected data is in an array format.
++    if (is_array($decodedResult) && isset($decodedResult['data'])) {
++      $models = [];
++      foreach ($decodedResult['data'] as $model) {
++        if (isset($model['id'])) {
++          // Assuming each model has an 'id' you want to use as both key and value.
++          $models[$model['id']] = $model['id'];
++        }
++      }
++      return $models;
++    }
++
++    // Log an error or handle the case where $result isn't in the expected format.
++    \Drupal::logger('augmentor_chatgpt')->error('Unexpected API response format.');
++    return [];
++  }
++
++
++  /**
++   * Fetches models using the openai-php SDK.
++   *
++   * @return array
++   */
++  protected function listModelsOpenAiPhp(): array {
++    $client = $this->getOpenAiClient(); // Ensures the openai-php client is initialized.
++    $response = $client->models()->list();
++    // Transform $response to an associative array for form options, if needed.
++    $models = [];
++    foreach ($response['data'] as $model) {
++      $models[$model['id']] = $model['id']; // Adjust according to actual response structure.
++    }
++    return $models;
++  }
+ }
++
++
+diff --git a/src/Plugin/Augmentor/ChatGpt.php b/src/Plugin/Augmentor/ChatGpt.php
+index eb47882..4f6c946 100644
+--- a/src/Plugin/Augmentor/ChatGpt.php
++++ b/src/Plugin/Augmentor/ChatGpt.php
+@@ -57,16 +57,24 @@ class ChatGpt extends ChatGptBase {
+   public function buildConfigurationForm(array $form, FormStateInterface $form_state) {
+     $form = parent::buildConfigurationForm($form, $form_state);
+ 
+-    $form['model'] = [
+-      '#type' => 'select',
+-      '#title' => $this->t('Model'),
+-      '#description' => $this->t("Currently, only gpt-3.5-turbo and gpt-3.5-turbo-0301 are <a href='https://platform.openai.com/docs/api-reference/chat/create#chat/create-model' target='_blank'>supported</a>."),
+-      '#options' => [
+-        'gpt-3.5-turbo' => 'gpt-3.5-turbo',
+-        'gpt-3.5-turbo-0301' => 'gpt-3.5-turbo-0301',
+-      ],
+-      '#default_value' => $this->configuration['model'] ?? self::DEFAULT_ENGINE,
+-    ];
++    // Model selection, conditional on the SDK chosen.
++    $modelsOptions = []; // Default to an empty array or some default option.
++    if ($this->getSdk() === 'orhanerday') {
++      $modelsOptions = $this->listModelsOrhanerday();
++    } else {
++      $modelsOptions = $this->listModelsOpenAiPhp();
++    }
++
++    // Ensure there's a key in the configuration, indicating an API key is set.
++    if (!empty($this->configuration['key']) && !empty($modelsOptions)) {
++      $form['model'] = [
++        '#type' => 'select',
++        '#title' => $this->t('Model'),
++        '#options' => $modelsOptions,
++        '#description' => $this->t("The model used for the chat completion."),
++        '#default_value' => $this->configuration['model'] ?? array_key_first($modelsOptions),
++      ];
++    }
+ 
+     $messages = $this->configuration['messages'] ?? [];
+     $num_messages = $form_state->get('num_messages');
+@@ -91,7 +99,7 @@ class ChatGpt extends ChatGptBase {
+ 
+     $form['messages']['description'] = [
+       '#type' => 'markup',
+-      '#markup' => $this->t('The messages to generate chat completions for, in 
++      '#markup' => $this->t('The messages to generate chat completions for, in
+       the format described in the official <a href="https://platform.openai.com/docs/guides/chat/introduction" target="_blank">documentation</a>, for example:<pre>
+       role: "system", content: "You are a helpful assistant."
+       role: "user", content: "Who won the world series in 2020?"
+@@ -111,7 +119,7 @@ class ChatGpt extends ChatGptBase {
+         '#type' => 'textarea',
+         '#title' => $this->t('Content'),
+         '#default_value' => $messages[$i]['content'] ?? '{input}',
+-        '#description' => $this->t('The content of the message. 
++        '#description' => $this->t('The content of the message.
+           You can use {input} to insert the input text for this augmentor.'),
+       ];
+     }
+@@ -184,7 +192,7 @@ class ChatGpt extends ChatGptBase {
+       '#type' => 'number',
+       '#title' => $this->t('N'),
+       '#default_value' => $this->configuration['n'] ?? 1,
+-      '#description' => $this->t('How many completions to generate for each prompt. 
++      '#description' => $this->t('How many completions to generate for each prompt.
+         Note: Because this parameter generates many completions, it can quickly consume your token quota. Use carefully and ensure that you have reasonable settings for max_tokens and stop.'),
+     ];
+ 
+@@ -311,16 +319,23 @@ class ChatGpt extends ChatGptBase {
+     }
+ 
+     try {
+-      $result = Json::decode($this->getClient()->chat($options), TRUE);
++      if ($this->getSdk() === 'orhanerday') {
++        $result = Json::decode($this->getClient()->chat($options), TRUE);
++      }
++      else {
++        $result = $this->getClient()->chat()->create($options)->toArray();
++      }
++
++      $output = [];
+       $choices = [];
+ 
+-      if (array_key_exists('_errors', $result)) {
++      if (array_key_exists('error', $result)) {
+         $this->logger->error('OpenAI API error: %message.', [
+-          '%message' => $result['_errors']['message'],
++          '%message' => $result['error']['message'],
+         ]);
+ 
+         return [
+-          '_errors' => $this->t('Error during the chat completion execution, please check the logs for more information.')->render(),
++          'error' => $this->t('Error during the chat completion execution, please check the logs for more information.')->render(),
+         ];
+       }
+       else {
+@@ -329,9 +344,9 @@ class ChatGpt extends ChatGptBase {
+             $choices[] = $this->normalizeText($choice['message']['content']);
+           }
+         }
+-
+-        $output['default'] = $choices;
+       }
++
++      $output['default'] = $choices;
+     }
+     catch (\Throwable $error) {
+       $this->logger->error('OpenAI API error: %message.', [
+@@ -344,5 +359,4 @@ class ChatGpt extends ChatGptBase {
+ 
+     return $output;
+   }
+-
+ }

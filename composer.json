@@ -5,6 +5,7 @@
   "homepage": "http://drupal.org/project/augmentor_chatgpt",
   "license": "GPL-2.0-or-later",
   "require": {
-    "orhanerday/open-ai": "^4.7"
+    "orhanerday/open-ai": "^4.7",
+    "openai-php/client": "^0.4"
   }
 }

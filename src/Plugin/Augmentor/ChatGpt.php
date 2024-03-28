@@ -57,13 +57,22 @@ class ChatGpt extends ChatGptBase {
   public function buildConfigurationForm(array $form, FormStateInterface $form_state) {
     $form = parent::buildConfigurationForm($form, $form_state);
 
-    if ($this->configuration['key']) {
+    // Model selection, conditional on the SDK chosen.
+    $modelsOptions = []; // Default to an empty array or some default option.
+    if ($this->getSdk() === 'orhanerday') {
+      $modelsOptions = $this->listModelsOrhanerday();
+    } else {
+      $modelsOptions = $this->listModelsOpenAiPhp();
+    }
+
+    // Ensure there's a key in the configuration, indicating an API key is set.
+    if (!empty($this->configuration['key']) && !empty($modelsOptions)) {
       $form['model'] = [
         '#type' => 'select',
         '#title' => $this->t('Model'),
-        '#options' => $this->engines(),
+        '#options' => $modelsOptions,
         '#description' => $this->t("The model used for the chat completion."),
-        '#default_value' => $this->configuration['model'] ?? self::DEFAULT_ENGINE,
+        '#default_value' => $this->configuration['model'] ?? array_key_first($modelsOptions),
       ];
     }
 
@@ -90,7 +99,7 @@ class ChatGpt extends ChatGptBase {
 
     $form['messages']['description'] = [
       '#type' => 'markup',
-      '#markup' => $this->t('The messages to generate chat completions for, in 
+      '#markup' => $this->t('The messages to generate chat completions for, in
       the format described in the official <a href="https://platform.openai.com/docs/guides/chat/introduction" target="_blank">documentation</a>, for example:<pre>
       role: "system", content: "You are a helpful assistant."
       role: "user", content: "Who won the world series in 2020?"
@@ -110,7 +119,7 @@ class ChatGpt extends ChatGptBase {
         '#type' => 'textarea',
         '#title' => $this->t('Content'),
         '#default_value' => $messages[$i]['content'] ?? '{input}',
-        '#description' => $this->t('The content of the message. 
+        '#description' => $this->t('The content of the message.
           You can use {input} to insert the input text for this augmentor.'),
       ];
     }
@@ -183,7 +192,7 @@ class ChatGpt extends ChatGptBase {
       '#type' => 'number',
       '#title' => $this->t('N'),
       '#default_value' => $this->configuration['n'] ?? 1,
-      '#description' => $this->t('How many completions to generate for each prompt. 
+      '#description' => $this->t('How many completions to generate for each prompt.
         Note: Because this parameter generates many completions, it can quickly consume your token quota. Use carefully and ensure that you have reasonable settings for max_tokens and stop.'),
     ];
 
@@ -310,16 +319,23 @@ class ChatGpt extends ChatGptBase {
     }
 
     try {
-      $result = Json::decode($this->getClient()->chat($options), TRUE);
+      if ($this->getSdk() === 'orhanerday') {
+        $result = Json::decode($this->getClient()->chat($options), TRUE);
+      }
+      else {
+        $result = $this->getClient()->chat()->create($options)->toArray();
+      }
+
+      $output = [];
       $choices = [];
 
-      if (array_key_exists('_errors', $result)) {
+      if (array_key_exists('error', $result)) {
         $this->logger->error('OpenAI API error: %message.', [
-          '%message' => $result['_errors']['message'],
+          '%message' => $result['error']['message'],
         ]);
 
         return [
-          '_errors' => $this->t('Error during the chat completion execution, please check the logs for more information.')->render(),
+          'error' => $this->t('Error during the chat completion execution, please check the logs for more information.')->render(),
         ];
       }
       else {
@@ -328,9 +344,9 @@ class ChatGpt extends ChatGptBase {
             $choices[] = $this->normalizeText($choice['message']['content']);
           }
         }
-
-        $output['default'] = $choices;
       }
+
+      $output['default'] = $choices;
     }
     catch (\Throwable $error) {
       $this->logger->error('OpenAI API error: %message.', [
@@ -343,30 +359,4 @@ class ChatGpt extends ChatGptBase {
 
     return $output;
   }
-
-  /**
-   * Gets the available list of OpenAI engines.
-   *
-   * @return array
-   *   A list of available engines.
-   */
-  private function engines() {
-    $engines = [];
-    $results = $this->getClient()->engines();
-    $results = Json::decode($results, TRUE);
-
-    if (array_key_exists('data', $results)) {
-      foreach ($results['data'] as $result) {
-        $engines[$result['id']] = $result['id'];
-      }
-    }
-    else {
-      $this->logger->error('OpenAI API error: %message.', [
-        '%message' => $results['error']['message'],
-      ]);
-    }
-
-    return $engines;
-  }
-
 }
